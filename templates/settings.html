@@ -1,0 +1,27 @@
+<div id="bfcv-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>BF Cache Verify</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+            <label class="checkbox_label">
+                <input id="bfcv-set-enabled" type="checkbox">
+                <span>Aktiviert</span>
+            </label>
+            <label class="checkbox_label">
+                <input id="bfcv-set-autocheck" type="checkbox">
+                <span>Auto-Check bei jeder Generierung</span>
+            </label>
+            <label>
+                <span>Plugin-Basis-URL</span>
+            </label>
+            <input id="bfcv-set-pluginbase" class="text_pole" type="text" placeholder="/api/plugins/bf-cache-verify">
+            <div class="bfcv-settings-row">
+                <input id="bfcv-set-showpanel" class="menu_button" type="button" value="Panel anzeigen">
+                <input id="bfcv-set-run" class="menu_button" type="button" value="Checks ausführen">
+            </div>
+            <small>Prüft, ob Claude Prompt-Caching über OpenRouter funktioniert. Companion-Plugin (optional) für config.yaml-Check, cache_discount-Lookup und Log-Datei.</small>
+        </div>
+    </div>
+</div>
