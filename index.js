@@ -16,7 +16,7 @@
 (function () {
     const EXT_NAME = 'bf-cache-verify';
     const LOG_PREFIX = '[BFCacheVerify]';
-    const VERSION = '1.3.0';
+    const VERSION = '1.4.0';
 
     const DEFAULT_SETTINGS = {
         enabled: true,
@@ -38,6 +38,8 @@
     const snapshots = new Map();
     // Distance-from-end of recent mid-prompt cache breaks (fixed-depth injection detector).
     const divergenceDistances = [];
+    // Client-side ring buffer of the last 5 FULL outgoing prompts (for one-click export).
+    const recentPrompts = [];
 
     // Last intercepted /generate request+response (check 5).
     let lastCapture = null;
@@ -684,6 +686,18 @@
                 log('Quiet-Generierung (Hintergrund) erkannt — Checks 3/4 übersprungen, Snapshot bleibt unverändert.', 'info');
                 return;
             }
+            if (staged) {
+                // Record the full context for the "Kontext (5)" export button —
+                // independent of autoCheck, so copying always has material.
+                recentPrompts.push({
+                    ts: new Date().toISOString(),
+                    chatId: (() => { try { return ctx().chatId ?? null; } catch { return null; } })(),
+                    meta: { ...lastRequestMeta },
+                    messageCount: staged.length,
+                    messages: staged,
+                });
+                if (recentPrompts.length > 5) recentPrompts.shift();
+            }
             if (staged && settings.autoCheck) {
                 // Sync + fast: snapshot diff. (This listener blocks generation while it runs.)
                 runCheck4(staged);
@@ -695,6 +709,77 @@
             }
         } catch (err) {
             log(`SETTINGS_READY-Handler Fehler: ${err.message}`, 'error');
+        }
+    }
+
+    /** Clipboard write with fallback for http:// origins (phone via LAN IP). */
+    async function copyText(text) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch { /* async clipboard blocked on insecure origins — fall back */ }
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        const ok = document.execCommand('copy');
+        ta.remove();
+        if (!ok) throw new Error('Zwischenablage nicht verfügbar (http-Origin?)');
+    }
+
+    // Whitelisted chat-completion settings for the export (no secrets/proxy fields).
+    const SETTINGS_EXPORT_KEYS = [
+        'chat_completion_source', 'openrouter_model', 'model_openrouter', 'stream_openai',
+        'openai_max_context', 'openai_max_tokens', 'squash_system_messages',
+        'openrouter_middleout', 'wrap_in_quotes', 'names_behavior', 'continue_postfix',
+        'impersonation_prompt_position',
+    ];
+
+    /**
+     * One-click export: the last 5 FULL contexts (every message incl. system
+     * prompts), request meta per run, current connection settings subset and
+     * the server-side caching config — as a single JSON for pasting into a
+     * debugging chat.
+     */
+    async function copyFullContexts() {
+        try {
+            if (!recentPrompts.length) {
+                log('Noch keine Kontexte aufgezeichnet — erst 1-5 Nachrichten generieren, dann kopieren.', 'warn');
+                return;
+            }
+            const c = ctx();
+            let configData = null;
+            if (pluginState !== 'ok') await probePlugin();
+            if (pluginState === 'ok') {
+                try { configData = await pluginFetch('/config'); } catch { /* optional */ }
+            }
+            const ccs = c.chatCompletionSettings || {};
+            const settingsSubset = {};
+            for (const k of SETTINGS_EXPORT_KEYS) {
+                if (k in ccs) settingsSubset[k] = ccs[k];
+            }
+            const payload = {
+                exportedAt: new Date().toISOString(),
+                extension: `bf-cache-verify v${VERSION}`,
+                environment: {
+                    mainApi: c.mainApi,
+                    model: (() => { try { return c.getChatCompletionModel(); } catch { return null; } })(),
+                    chatCompletionSettings: settingsSubset,
+                    configYaml: configData
+                        ? { effective: configData.effective, file: configData.file, restartRequired: configData.restartRequired }
+                        : 'Plugin nicht erreichbar — config.yaml-Werte unbekannt',
+                },
+                note: 'runs[] = die letzten (max 5) komplett gesendeten Prompts, älteste zuerst. messages enthält ALLE Nachrichten inkl. System-Prompt.',
+                runs: recentPrompts,
+            };
+            const text = JSON.stringify(payload, null, 1);
+            await copyText(text);
+            log(`${recentPrompts.length} komplette Kontexte kopiert (${Math.round(text.length / 1024)} KB, inkl. System-Prompts + Settings).`, 'ok');
+        } catch (err) {
+            log(`Kontext-Kopieren fehlgeschlagen: ${err.message}`, 'error');
         }
     }
 
@@ -806,7 +891,8 @@
             <div class="bfcv-logbar">
                 <span>Log</span>
                 <span>
-                    <button id="bfcv-btn-copylog" class="bfcv-btn" title="Log in Zwischenablage kopieren">Kopieren</button>
+                    <button id="bfcv-btn-copyctx" class="bfcv-btn" title="Die letzten 5 komplett gesendeten Prompts (inkl. System-Prompt) + Settings als JSON kopieren — zum Einfügen in einen Debugging-Chat">Kontext (5) kopieren</button>
+                    <button id="bfcv-btn-copylog" class="bfcv-btn" title="Log in Zwischenablage kopieren">Log</button>
                     <button id="bfcv-btn-clearlog" class="bfcv-btn" title="Log leeren">Leeren</button>
                 </span>
             </div>
@@ -817,10 +903,13 @@
         // Check 6 is the log itself — mark it green once the panel exists.
         setLight(6, 'green', `Log aktiv. Serverseitige Datei: SillyTavern/plugins/bf-cache-verify/cache-verify.log (nur mit Plugin). Live verfolgen: <code>Get-Content -Wait</code> (Windows) / <code>tail -f</code> (Termux).`);
 
+        document.getElementById('bfcv-btn-copyctx').addEventListener('click', () => {
+            copyFullContexts().catch((err) => log(`Kontext-Kopieren Fehler: ${err.message}`, 'error'));
+        });
         document.getElementById('bfcv-btn-copylog').addEventListener('click', async () => {
             try {
                 const text = logLines.map((l) => l.line).join('\n');
-                await navigator.clipboard.writeText(text);
+                await copyText(text);
                 log('Log in Zwischenablage kopiert.', 'info');
             } catch (err) {
                 log(`Kopieren fehlgeschlagen: ${err.message}`, 'error');
