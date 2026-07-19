@@ -16,13 +16,15 @@
 (function () {
     const EXT_NAME = 'bf-cache-verify';
     const LOG_PREFIX = '[BFCacheVerify]';
-    const VERSION = '1.2.0';
+    const VERSION = '1.3.0';
 
     const DEFAULT_SETTINGS = {
         enabled: true,
         autoCheck: true,
         pluginBase: '/api/plugins/bf-cache-verify',
         panelCollapsed: false,
+        // Save the FULL outgoing prompt per generation to plugins/bf-cache-verify/prompt-dumps/.
+        dumpPrompts: true,
     };
 
     /** @type {typeof DEFAULT_SETTINGS} */
@@ -34,6 +36,8 @@
 
     // In-memory prompt snapshots keyed by chat id (check 4).
     const snapshots = new Map();
+    // Distance-from-end of recent mid-prompt cache breaks (fixed-depth injection detector).
+    const divergenceDistances = [];
 
     // Last intercepted /generate request+response (check 5).
     let lastCapture = null;
@@ -142,7 +146,19 @@
             ? c.getRequestHeaders()
             : { 'Content-Type': 'application/json' };
         const resp = await fetch(pluginBase() + path, { headers, ...opts });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) {
+            // Surface the plugin's JSON error body (e.g. proxied OpenRouter status/detail).
+            let detail = '';
+            try {
+                const j = await resp.json();
+                if (j && j.error) {
+                    detail = ` — ${j.error}`
+                        + (j.status ? ` (OpenRouter HTTP ${j.status})` : '')
+                        + (j.detail ? `: ${String(j.detail).slice(0, 200)}` : '');
+                }
+            } catch { /* body not JSON */ }
+            throw new Error(`HTTP ${resp.status}${detail}`);
+        }
         return resp.json();
     }
 
@@ -434,7 +450,26 @@
                 const where = tailAppend
                     ? `Nur am Ende angehängt (Index ${divergence.index}) — Präfix stabil, Cache kann greifen.`
                     : `ERSTE Abweichung bei Nachricht #${divergence.index}: ${escapeHtml(divergence.desc)} — ab hier bricht der Cache; alles danach wird neu berechnet.`;
-                setLight(4, state, `${where}<br><code class="bfcv-excerpt">${escapeHtml(divergence.excerpt)}</code>${volatileHtml}`);
+
+                // Fixed-depth injection detector: if the break sits at a CONSTANT
+                // distance from the end across turns, something is injected
+                // in-chat at a fixed depth (Author's Note default @D4, lorebook
+                // @D entries, Vector Storage, Summarize) and shifts every turn.
+                let injectionHtml = '';
+                if (!tailAppend) {
+                    const dist = normalized.length - divergence.index;
+                    divergenceDistances.push(dist);
+                    if (divergenceDistances.length > 5) divergenceDistances.shift();
+                    const repeated = divergenceDistances.length >= 2
+                        && divergenceDistances.slice(-2).every(d => d === dist);
+                    if (repeated) {
+                        const depthGuess = Math.max(0, dist - 1);
+                        injectionHtml = `<br><span class="bfcv-mini bfcv-bad">✘</span> DIAGNOSE: Der Bruch liegt jede Runde konstant ${dist} Nachrichten vor dem Ende → eine Injection bei fester Tiefe ≈${depthGuess} verschiebt sich mit jedem Turn (typisch: Author's Note @D4, Lorebook-Eintrag "@D", Vector Storage, Summarize). FIX: Injection-Tiefe auf 0-1 stellen (liegt dann UNTER dem cachingAtDepth-Breakpoint und bricht nichts mehr) oder Position auf "Before/After Char" (stabiler Anfang) ändern.`;
+                        log(`Check 4 DIAGNOSE: konstanter Bruch ${dist} vor Ende → Fixed-Depth-Injection (Tiefe ≈${depthGuess}); Fix: Tiefe ≤1 oder Position oben`, 'error');
+                    }
+                }
+
+                setLight(4, state, `${where}<br><code class="bfcv-excerpt">${escapeHtml(divergence.excerpt)}</code>${injectionHtml}${volatileHtml}`);
                 log(`Check 4 (Präfix): Abweichung bei #${divergence.index} (${divergence.desc})${tailAppend ? ' [nur Anhang — ok]' : ' [CACHE-BRUCH]'}`, state === 'green' ? 'ok' : 'warn');
             }
         } catch (err) {
@@ -655,10 +690,25 @@
                 // Token estimate may hit the server tokenizer — run detached, don't block generation.
                 runCheck3(staged).catch(() => { /* logged inside */ });
                 runCheck1();
+                // Full-context dump to disk (fire-and-forget, needs the plugin).
+                dumpPrompt(staged, lastRequestMeta);
             }
         } catch (err) {
             log(`SETTINGS_READY-Handler Fehler: ${err.message}`, 'error');
         }
+    }
+
+    /** Save the complete outgoing prompt (all messages) as a JSON file on disk. */
+    function dumpPrompt(normalized, meta) {
+        if (!settings.dumpPrompts || pluginState !== 'ok') return;
+        pluginFetch('/dump', {
+            method: 'POST',
+            body: JSON.stringify({ meta, messages: normalized }),
+        }).then((r) => {
+            if (r?.ok) log(`Prompt-Dump gespeichert: ${r.file} (${normalized.length} Nachrichten)`, 'info');
+        }).catch((err) => {
+            log(`Prompt-Dump fehlgeschlagen: ${err.message}`, 'warn');
+        });
     }
 
     function onGenerationEnded() {
@@ -814,6 +864,12 @@
         });
         $auto.on('change', function () {
             settings.autoCheck = this.checked;
+            saveSettings();
+        });
+        const $dump = $('#bfcv-set-dump');
+        $dump.prop('checked', settings.dumpPrompts);
+        $dump.on('change', function () {
+            settings.dumpPrompts = this.checked;
             saveSettings();
         });
         $base.on('input', function () {
