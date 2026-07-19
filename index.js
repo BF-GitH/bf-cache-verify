@@ -16,7 +16,7 @@
 (function () {
     const EXT_NAME = 'bf-cache-verify';
     const LOG_PREFIX = '[BFCacheVerify]';
-    const VERSION = '1.1.0';
+    const VERSION = '1.2.0';
 
     const DEFAULT_SETTINGS = {
         enabled: true,
@@ -729,10 +729,17 @@
         [6, 'Live-Log'],
     ];
 
+    // Renders the checklist + log INSIDE the extensions settings drawer
+    // ("backend menu"). A floating fixed-position popup was unreliable on
+    // Chrome mobile, so the drawer is the only UI surface now.
     function buildPanel() {
+        const mount = document.getElementById('bfcv-drawer-mount');
+        if (!mount) {
+            console.error(LOG_PREFIX, 'drawer mount not found — settings.html missing/outdated');
+            return;
+        }
         const panel = document.createElement('div');
         panel.id = 'bfcv-panel';
-        if (settings.panelCollapsed) panel.classList.add('bfcv-collapsed');
 
         const checksHtml = CHECK_LABELS.map(([no, label]) => `
             <div class="bfcv-check" id="bfcv-check-${no}">
@@ -745,42 +752,21 @@
             </div>`).join('');
 
         panel.innerHTML = `
-            <div class="bfcv-header">
-                <span class="bfcv-title">🧊 BF Cache Verify</span>
-                <span class="bfcv-header-buttons">
-                    <button id="bfcv-btn-run" class="bfcv-btn" title="Alle Checks ausführen">Prüfen</button>
-                    <button id="bfcv-btn-collapse" class="bfcv-btn" title="Ein-/Ausklappen">▁</button>
-                    <button id="bfcv-btn-close" class="bfcv-btn" title="Panel schließen">✕</button>
+            <div class="bfcv-checks">${checksHtml}</div>
+            <div class="bfcv-logbar">
+                <span>Log</span>
+                <span>
+                    <button id="bfcv-btn-copylog" class="bfcv-btn" title="Log in Zwischenablage kopieren">Kopieren</button>
+                    <button id="bfcv-btn-clearlog" class="bfcv-btn" title="Log leeren">Leeren</button>
                 </span>
             </div>
-            <div class="bfcv-body">
-                <div class="bfcv-checks">${checksHtml}</div>
-                <div class="bfcv-logbar">
-                    <span>Log</span>
-                    <span>
-                        <button id="bfcv-btn-copylog" class="bfcv-btn" title="Log in Zwischenablage kopieren">Kopieren</button>
-                        <button id="bfcv-btn-clearlog" class="bfcv-btn" title="Log leeren">Leeren</button>
-                    </span>
-                </div>
-                <div id="bfcv-log"></div>
-            </div>`;
+            <div id="bfcv-log"></div>`;
 
-        document.body.appendChild(panel);
+        mount.appendChild(panel);
 
         // Check 6 is the log itself — mark it green once the panel exists.
         setLight(6, 'green', `Log aktiv. Serverseitige Datei: SillyTavern/plugins/bf-cache-verify/cache-verify.log (nur mit Plugin). Live verfolgen: <code>Get-Content -Wait</code> (Windows) / <code>tail -f</code> (Termux).`);
 
-        document.getElementById('bfcv-btn-run').addEventListener('click', () => {
-            runAllChecks().catch((err) => log(`runAllChecks Fehler: ${err.message}`, 'error'));
-        });
-        document.getElementById('bfcv-btn-collapse').addEventListener('click', () => {
-            panel.classList.toggle('bfcv-collapsed');
-            settings.panelCollapsed = panel.classList.contains('bfcv-collapsed');
-            saveSettings();
-        });
-        document.getElementById('bfcv-btn-close').addEventListener('click', () => {
-            panel.style.display = 'none';
-        });
         document.getElementById('bfcv-btn-copylog').addEventListener('click', async () => {
             try {
                 const text = logLines.map((l) => l.line).join('\n');
@@ -795,11 +781,6 @@
             const el = document.getElementById('bfcv-log');
             if (el) el.innerHTML = '';
         });
-    }
-
-    function showPanel() {
-        const panel = document.getElementById('bfcv-panel');
-        if (panel) panel.style.display = '';
     }
 
     // -------------------------------------------------------- settings drawer
@@ -840,9 +821,7 @@
             pluginState = 'unknown';
             saveSettings();
         });
-        $('#bfcv-set-showpanel').on('click', () => showPanel());
         $('#bfcv-set-run').on('click', () => {
-            showPanel();
             runAllChecks().catch((err) => log(`runAllChecks Fehler: ${err.message}`, 'error'));
         });
     }
@@ -853,8 +832,9 @@
         try {
             loadSettings();
             installFetchInterceptor();
-            buildPanel();
+            // Drawer first — the panel mounts inside it (#bfcv-drawer-mount).
             await initSettingsDrawer();
+            buildPanel();
             wireEvents();
 
             log(`BF Cache Verify v${VERSION} geladen.`, 'info');

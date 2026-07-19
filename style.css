@@ -1,48 +1,19 @@
 /* BF Cache Verify — panel + settings styling (follows ST theme variables) */
 
+/* Lives inside the extensions settings drawer (#bfcv-drawer-mount) —
+   no fixed positioning / backdrop-filter (broken on Chrome mobile). */
 #bfcv-panel {
-    position: fixed;
-    right: 12px;
-    bottom: 64px;
-    width: 420px;
-    max-width: calc(100vw - 24px);
-    max-height: 70vh;
     display: flex;
     flex-direction: column;
-    z-index: 3000;
-    background-color: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, 0.95));
+    gap: 6px;
+    margin-top: 8px;
+    padding: 8px;
+    width: 100%;
     color: var(--SmartThemeBodyColor, #eee);
+    background-color: rgba(0, 0, 0, 0.15);
     border: 1px solid var(--SmartThemeBorderColor, #444);
     border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     font-size: 0.85em;
-    backdrop-filter: blur(4px);
-}
-
-#bfcv-panel .bfcv-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
-    cursor: default;
-    flex: 0 0 auto;
-}
-
-#bfcv-panel .bfcv-title {
-    font-weight: bold;
-}
-
-#bfcv-panel.bfcv-collapsed .bfcv-body {
-    display: none;
-}
-
-#bfcv-panel .bfcv-body {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    padding: 8px;
-    gap: 6px;
 }
 
 .bfcv-btn {
