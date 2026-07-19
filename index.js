@@ -16,7 +16,7 @@
 (function () {
     const EXT_NAME = 'bf-cache-verify';
     const LOG_PREFIX = '[BFCacheVerify]';
-    const VERSION = '1.4.0';
+    const VERSION = '1.4.1';
 
     const DEFAULT_SETTINGS = {
         enabled: true,
@@ -776,11 +776,25 @@
                 runs: recentPrompts,
             };
             const text = JSON.stringify(payload, null, 1);
-            await copyText(text);
-            log(`${recentPrompts.length} komplette Kontexte kopiert (${Math.round(text.length / 1024)} KB, inkl. System-Prompts + Settings).`, 'ok');
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            downloadText(`bf-cache-context-${stamp}.json`, text);
+            log(`${recentPrompts.length} komplette Kontexte als Datei heruntergeladen (${Math.round(text.length / 1024)} KB, inkl. System-Prompts + Settings).`, 'ok');
         } catch (err) {
-            log(`Kontext-Kopieren fehlgeschlagen: ${err.message}`, 'error');
+            log(`Kontext-Export fehlgeschlagen: ${err.message}`, 'error');
         }
+    }
+
+    /** Trigger a browser download of a text payload (works on desktop + mobile). */
+    function downloadText(filename, text) {
+        const blob = new Blob([text], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
     }
 
     /** Save the complete outgoing prompt (all messages) as a JSON file on disk. */
@@ -891,7 +905,7 @@
             <div class="bfcv-logbar">
                 <span>Log</span>
                 <span>
-                    <button id="bfcv-btn-copyctx" class="bfcv-btn" title="Die letzten 5 komplett gesendeten Prompts (inkl. System-Prompt) + Settings als JSON kopieren — zum Einfügen in einen Debugging-Chat">Kontext (5) kopieren</button>
+                    <button id="bfcv-btn-copyctx" class="bfcv-btn" title="Die letzten 5 komplett gesendeten Prompts (inkl. System-Prompt) + Settings als JSON-Datei herunterladen">Kontext (5) ⬇</button>
                     <button id="bfcv-btn-copylog" class="bfcv-btn" title="Log in Zwischenablage kopieren">Log</button>
                     <button id="bfcv-btn-clearlog" class="bfcv-btn" title="Log leeren">Leeren</button>
                 </span>
