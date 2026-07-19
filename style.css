@@ -159,3 +159,6 @@
     gap: 8px;
     margin-top: 6px;
 }
+
+/* Auto-fix button (check 2) */
+.bfcv-btn-fix { margin-left: 4px; }

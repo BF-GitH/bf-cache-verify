@@ -5,7 +5,7 @@ SillyTavern UI-Extension, die prüft, ob **Claude Prompt-Caching über OpenRoute
 ## Was es macht (6 Checks als Ampel-Checkliste)
 
 1. **Einstellungen** — Quelle = OpenRouter, Modus = Chat Completion, Claude-Modell (Server injiziert `cache_control` nur bei Modell-IDs mit Präfix `anthropic/claude`), Streaming-Hinweis.
-2. **config.yaml** — `claude.cachingAtDepth` (≠ -1, gerade Zahl empfohlen, z.B. 2) und `claude.enableSystemPromptCache` (via Companion-Plugin).
+2. **config.yaml** — `claude.cachingAtDepth` (≠ -1, gerade Zahl empfohlen, z.B. 2) und `claude.enableSystemPromptCache` (via Companion-Plugin). Bei falschem Wert erscheint ein **🔧 Auto-Fix-Button**, der `cachingAtDepth: 2` direkt in die config.yaml schreibt (mit Backup `config.yaml.bak-bfcv`; danach ST neu starten). Nur `enableServerPlugins` selbst muss einmalig manuell auf `true` gesetzt werden — das Plugin, das die Datei schreibt, läuft erst, wenn dieser Wert schon stimmt (Henne-Ei).
 3. **Mindest-Tokenzahl** — schätzt die Prompt-Länge und vergleicht mit dem Modell-Minimum (~4096 Opus 4.5+/Haiku 4.5, ~2048 Haiku 3.5, ~1024 Sonnet 4.x/Opus 4.x). Darunter wird **still** nicht gecacht.
 4. **Präfix-Stabilität** — Snapshot des ausgehenden Prompts pro Chat; beim nächsten Mal Diff mit Anzeige der **ersten Abweichung** (dort bricht der Cache). Warnt vor `{{random}}`-Resten und Zeitstempeln im System-Prompt.
 5. **Live-Beweis** — liest `usage.prompt_tokens_details` (cached_tokens / cache_write_tokens) aus der Antwort und holt via Plugin die OpenRouter-`/generation`-Statistik (`cache_discount`). Urteil: CACHE HIT / CACHE WRITE / NO CACHING.

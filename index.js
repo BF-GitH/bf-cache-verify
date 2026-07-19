@@ -7,6 +7,7 @@
 //   GET  <pluginBase>/probe            -> { ok: true, version }
 //   GET  <pluginBase>/config           -> { claude/effective: <boot-time values>, file: <fresh parse>, restartRequired, raw }
 //   GET  <pluginBase>/generation?id=X  -> { ok, data: { cache_discount, native_tokens_cached, ... } }
+//   POST <pluginBase>/fix-config {cachingAtDepth} -> { ok, from, to, backup, restartRequired }
 //   POST <pluginBase>/log {line}       -> { ok: true }
 //   GET  <pluginBase>/log/tail?n=200   -> { lines: [...] }
 
@@ -15,7 +16,7 @@
 (function () {
     const EXT_NAME = 'bf-cache-verify';
     const LOG_PREFIX = '[BFCacheVerify]';
-    const VERSION = '1.0.0';
+    const VERSION = '1.1.0';
 
     const DEFAULT_SETTINGS = {
         enabled: true,
@@ -235,12 +236,13 @@
             const items = [];
             let state = 'green';
 
+            const fixButton = ' <button id="bfcv-btn-fixdepth" class="bfcv-btn bfcv-btn-fix" title="Setzt claude.cachingAtDepth = 2 in config.yaml (Backup wird angelegt). Danach ST neu starten!">🔧 Auto-Fix: auf 2 setzen</button>';
             if (typeof depth !== 'number' || depth === -1) {
                 state = 'red';
-                items.push('<span class="bfcv-mini bfcv-bad">✘</span> claude.cachingAtDepth = ' + escapeHtml(String(depth)) + ' → Nachrichten-Caching DEAKTIVIERT. Empfehlung: 2 setzen (config.yaml) und ST neu starten.');
+                items.push('<span class="bfcv-mini bfcv-bad">✘</span> claude.cachingAtDepth = ' + escapeHtml(String(depth)) + ' → Nachrichten-Caching DEAKTIVIERT.' + fixButton);
             } else if (depth % 2 !== 0) {
                 state = 'yellow';
-                items.push(`<span class="bfcv-mini bfcv-warn">⚠</span> claude.cachingAtDepth = ${depth} (ungerade). Gerade Zahl empfohlen, z.B. 2 — ungerade Tiefe setzt den Breakpoint auf eine User-Nachricht-Grenze, die sich häufiger verschiebt.`);
+                items.push(`<span class="bfcv-mini bfcv-warn">⚠</span> claude.cachingAtDepth = ${depth} (ungerade). Gerade Zahl empfohlen, z.B. 2 — ungerade Tiefe setzt den Breakpoint auf eine User-Nachricht-Grenze, die sich häufiger verschiebt.${fixButton}`);
             } else {
                 items.push(`<span class="bfcv-mini bfcv-ok">✔</span> claude.cachingAtDepth = ${depth}`);
             }
@@ -253,12 +255,39 @@
             }
 
             setLight(2, state, items.join('<br>'));
+            // setLight replaces innerHTML — (re)wire the auto-fix button afterwards.
+            const fixBtn = document.getElementById('bfcv-btn-fixdepth');
+            if (fixBtn) fixBtn.addEventListener('click', () => { autoFixDepth().catch(() => { /* logged inside */ }); });
             log(`Check 2 (config.yaml): cachingAtDepth=${depth}, enableSystemPromptCache=${sysCache}${data?.restartRequired ? ' [config.yaml geändert — Neustart nötig]' : ''} → ${state.toUpperCase()}`, state === 'green' ? 'ok' : 'warn');
             return data;
         } catch (err) {
             setLight(2, 'gray', `Fehler beim Abruf: ${escapeHtml(err.message)}. ${escapeHtml(PLUGIN_DOWN_HINT)}`);
             log(`Check 2 Fehler: ${err.message}`, 'error');
             return null;
+        }
+    }
+
+    /**
+     * Auto-fix: let the plugin set claude.cachingAtDepth = 2 in config.yaml
+     * (comment-preserving, with backup). Only cachingAtDepth can be automated —
+     * enableServerPlugins can't fix itself: the plugin that writes config.yaml
+     * only runs once that flag is already true.
+     */
+    async function autoFixDepth() {
+        try {
+            log('Auto-Fix: setze claude.cachingAtDepth = 2 in config.yaml …', 'info');
+            const resp = await pluginFetch('/fix-config', {
+                method: 'POST',
+                body: JSON.stringify({ cachingAtDepth: 2 }),
+            });
+            if (resp?.ok) {
+                log(`Auto-Fix erfolgreich: cachingAtDepth ${String(resp.from)} → ${resp.to} (Backup: ${resp.backup}). WICHTIG: SillyTavern neu starten, damit der Wert wirkt!`, 'ok');
+            } else {
+                log(`Auto-Fix fehlgeschlagen: ${resp?.error || 'unbekannter Fehler'}`, 'error');
+            }
+            await runCheck2();
+        } catch (err) {
+            log(`Auto-Fix Fehler: ${err.message}`, 'error');
         }
     }
 
